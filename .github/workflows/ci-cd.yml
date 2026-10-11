@@ -1,0 +1,83 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 22 * * 1-5"  # weekday mornings in Sydney: builds run history
+  workflow_dispatch:
+    inputs:
+      production:
+        description: Also deploy to production (needs approval)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SIMULATE: ${{ vars.LIVE_DEPLOYS != 'true' }}
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+      - run: npm test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build image
+        run: docker build -t "$IMAGE:${{ github.sha }}" .
+
+  deploy-staging:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build and push image
+        run: |
+          source .github/simulate.sh
+          docker build -t "$IMAGE:${{ github.sha }}" .
+          docker push "$IMAGE:${{ github.sha }}"
+      - name: Lint chart
+        run: helm lint ./chart
+      - name: Deploy
+        run: |
+          source .github/simulate.sh
+          helm upgrade --install web ./chart --namespace web-staging --set image.tag=${{ github.sha }} --wait
+          kubectl rollout status deployment/web --namespace web-staging --timeout 120s
+
+  deploy-production:
+    if: github.event_name == 'workflow_dispatch' && inputs.production
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Deploy
+        run: |
+          source .github/simulate.sh
+          helm upgrade --install web ./chart --namespace web --set image.tag=${{ github.sha }} --wait
+          kubectl rollout status deployment/web --namespace web --timeout 120s

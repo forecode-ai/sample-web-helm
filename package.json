@@ -1,0 +1,12 @@
+{
+  "name": "sample-web-helm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ForeCode test estate: web storefront",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "engines": {"node": ">=22"}
+}

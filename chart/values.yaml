@@ -1,0 +1,6 @@
+replicaCount: 2
+image:
+  repository: ghcr.io/forecode-ai/sample-web-helm
+  tag: latest
+service:
+  port: 8080
